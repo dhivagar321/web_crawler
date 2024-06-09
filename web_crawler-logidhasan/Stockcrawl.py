@@ -2,6 +2,8 @@ import yfinance as yf
 
 print("whether the stock is good time to buy or not")
 
+print("it's a push check")
+
 def predict_stock_recommendation(stock_symbol):
     # Create a Ticker object for the specified stock symbol
     stock = yf.Ticker(stock_symbol)
