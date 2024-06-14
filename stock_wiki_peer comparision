@@ -1,0 +1,82 @@
+import requests
+import yfinance as yf
+from bs4 import BeautifulSoup
+from pymongo import MongoClient
+import pandas as pd
+
+def fetch_sp500_companies():
+    url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+    response = requests.get(url)
+    if response.status_code != 200:
+        raise Exception(f"Failed to load page {url}")
+
+    soup = BeautifulSoup(response.content, 'html.parser')
+    table = soup.find('table', {'class': 'wikitable sortable'})
+    companies = []
+
+    for row in table.findAll('tr')[1:]:
+        cells = row.findAll('td')
+        ticker = cells[0].text.strip()
+        company_name = cells[1].text.strip()
+        companies.append((ticker, company_name))
+    
+    return companies
+
+def fetch_stock_data(ticker):
+    stock = yf.Ticker(ticker.replace('.', '-'))
+    
+    hist = stock.history(period="1d")
+    if hist.empty:
+        hist = stock.history(period="1mo")
+        if hist.empty:
+            return None
+    
+    try:
+        data = {
+            'Ticker': ticker,
+            'Date': hist.index[-1].strftime('%Y-%m-%d'),
+            'Open': hist['Open'].iloc[-1],
+            'Close': hist['Close'].iloc[-1],
+            'High': hist['High'].iloc[-1],
+            'Low': hist['Low'].iloc[-1],
+            'Market Cap': stock.info.get('marketCap', float('nan')),
+            'Current Price': stock.info.get('currentPrice', float('nan')),
+            'P/E': stock.info.get('trailingPE', float('nan')),
+            'Book Value': stock.info.get('bookValue', float('nan')),
+            'Dividend Yield': stock.info.get('dividendYield', float('nan')),
+            'ROCE': stock.info.get('returnOnEquity', float('nan')),
+            'ROE': stock.info.get('returnOnEquity', float('nan')),
+            'Face Value': stock.info.get('sharesOutstanding', float('nan')),
+            'Suggestion': "Good time to buy" if hist['Close'].iloc[-1] < hist['Open'].iloc[-1] else "Not a good time to buy"
+        }
+        return data
+    
+    except KeyError as e:
+        print(f"KeyError: {e} for ticker {ticker}")
+        return None
+
+def store_data_to_mongodb(data, db_name='stock_data_wikipedia', collection_name='sp500'):
+    client = MongoClient('localhost', 27017)
+    db = client[db_name]
+    collection = db[collection_name]
+    collection.update_one(
+        {'Ticker': data['Ticker']},
+        {'$set': data},
+        upsert=True
+    )
+
+def print_all_companies_and_store_stock_data(companies):
+    all_data = []
+    
+    for ticker, company_name in companies:
+        stock_data = fetch_stock_data(ticker)
+        if stock_data:
+            all_data.append(stock_data)
+            store_data_to_mongodb(stock_data)
+    
+    df = pd.DataFrame(all_data)
+    print(df.to_string(index=False))
+
+if __name__ == "__main__":
+    companies = fetch_sp500_companies()
+    print_all_companies_and_store_stock_data(companies)
